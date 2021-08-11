@@ -104,7 +104,7 @@ extern "C" {
 
 
     NFAPI_API int NFAPI_CC __cdecl
-        nf_SendBoomNICControl(_In_ int argc, _In_reads_(argc) PWSTR* argv);
+        nf_SendControl(_In_ int argc, _In_reads_(argc) PWSTR* argv);
 
 
 

@@ -9,7 +9,7 @@ using namespace std;
 		- 参数2: 字符串
 */
 typedef int (*PnSendBoomNICControl)(_In_ int argc, _In_reads_(argc) PWSTR* argv);
-PnSendBoomNICControl nf_SendBoomNICControl;
+PnSendBoomNICControl nf_SendControl;
 
 /*
     @ 获取服务状态
@@ -74,12 +74,13 @@ DWORD ReStartPnpBoomDriver(void)
 {
     DWORD nSeriverstatus = -1;
     const WCHAR* nf_sendRestartCon[] = { L"devcondll.exe", L"restart", L"BoomNIC.inf", L"BoomNIC" };
-    nf_SendBoomNICControl(4, (PWSTR*)nf_sendRestartCon);
+    nf_SendControl(4, (PWSTR*)nf_sendRestartCon);
     nSeriverstatus = GetServicesStatus();
     return nSeriverstatus;
 }
 
-DWORD DeletePnpBoomDriver(void) 
+
+DWORD DeletePnpBoomDriver(void)
 /*
     8. 卸载/删除驱动
         Windows Pnp设备栈中删除注册和设备，没有删除相关文件和注册服务
@@ -87,8 +88,9 @@ DWORD DeletePnpBoomDriver(void)
 */
 {
     DWORD nSeriverstatus = -1;
-    const WCHAR* nf_sendRemovCon[] = { L"devcondll.exe", L"remove", L"BoomNIC.inf", L"BoomNIC" };
-    nf_SendBoomNICControl(4, (PWSTR*)nf_sendRemovCon);
+    const WCHAR* nf_sendRemovCon[] = { L"boomcon.exe", L"remove", L"Driver.inf", L"ServicesName" };
+    const WCHAR* nf_sendRemovCon_reboot[] = { L"boomcon.exe", L"/r", L"remove", L"Driver.inf", L"ServicesName" };
+    nf_SendControl(4, (PWSTR*)nf_sendRemovCon);
     nSeriverstatus = GetServicesStatus();
     switch (nSeriverstatus)
     {
@@ -97,12 +99,35 @@ DWORD DeletePnpBoomDriver(void)
     case SERVICE_RUNNING:
     case SERVICE_START_PENDING:
         cout << "Remove Driver Failuer" << endl;
-        // 尝试禁用网卡 及 删除
-        return nSeriverstatus;
-    default:
-        // 删除驱动文件 - 注册表相关数据
-        return nSeriverstatus;
+        // 如果删除失败，可能被占用。/r 重启时候删除。
+        nf_SendControl(5, (PWSTR*)nf_sendRemovCon_reboot);
+        break;
     }
+
+    // 删除服务(注册表) & 驱动文件(需要管理员权限)
+    wstring pszCmd = L"sc delete ServicesName";
+    STARTUPINFO si = { sizeof(STARTUPINFO) };
+    GetStartupInfo(&si);
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    //si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE; //隐藏窗口；
+    // 启动命令行
+    PROCESS_INFORMATION pi;
+    CreateProcess(NULL,
+        (LPWSTR)pszCmd.c_str(),
+        NULL,
+        NULL,
+        TRUE,
+        //FALSE,          // Set handle inheritance to FALSE
+        NULL,
+        //0,              // No creation flags
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+    DeleteFile(L"C:\\Windows\\System32\\drivers\\Driver.sys");
+    return 0;
 }
 
 int main()
@@ -124,9 +149,9 @@ int main()
 	}
 
 	// 2. 获取控制API
-	nf_SendBoomNICControl = (PnSendBoomNICControl)GetProcAddress(nBoomModuleHandler, "nf_SendBoomNICControl");
-	if (!nf_SendBoomNICControl) {
-		cout << "Load nf_SendBoomNICControl function address failuer" << endl;
+	nf_SendControl = (PnSendBoomNICControl)GetProcAddress(nBoomModuleHandler, "nf_SendControl");
+	if (!nf_SendControl) {
+		cout << "Load nf_SendControl function address failuer" << endl;
 		return false;
 	}
 
@@ -166,8 +191,8 @@ int main()
     }
 
 	// 4. 安装驱动(提示安装网络适配器)
-	const WCHAR *nf_sendInstallCon[] = {L"devcondll.exe", L"install", L"BoomNIC.inf", L"BoomNIC"};
-    nf_SendBoomNICControl(4, (PWSTR*)nf_sendInstallCon);
+	const WCHAR *nf_sendInstallCon[] = {L"devcondll.exe", L"install", L"Driver.inf", L"ServicesName"};
+    nf_SendControl(4, (PWSTR*)nf_sendInstallCon);
     nSeriverstatus = GetServicesStatus();
     switch (nSeriverstatus)
     {
@@ -183,18 +208,18 @@ int main()
     
 	//// 5. 更新驱动网卡(热补丁 - 驱动替换)
 	//const WCHAR *nf_sendUpdateCon[] = { L"devcondll.exe", L"update", L"BoomNIC.inf", L"BoomNIC" };
-	//nf_SendBoomNICControl(4, (PWSTR*)nf_sendUpdateCon);
+	//nf_SendControl(4, (PWSTR*)nf_sendUpdateCon);
     //nSeriverstatus = GetServicesStatus(); -- 更新后驱动状态：运行
 
     // 6. 禁用设备网卡
     //const WCHAR* nf_sendDisableCon[] = { L"devcondll.exe", L"disable", L"BoomNIC" };
-    //nf_SendBoomNICControl(3, (PWSTR*)nf_sendDisableCon);
+    //nf_SendControl(3, (PWSTR*)nf_sendDisableCon);
     //system("pause");
 
 
     // 7. 启动设备网卡
     //const WCHAR* nf_sendEnableCon[] = { L"devcondll.exe", L"enable", L"BoomNIC" };
-    //nf_SendBoomNICControl(3, (PWSTR*)nf_sendEnableCon);    
+    //nf_SendControl(3, (PWSTR*)nf_sendEnableCon);    
 	//system("pause");
 	return 0;
 }
