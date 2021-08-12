@@ -10,6 +10,8 @@ using namespace std;
 */
 typedef int (*PnSendBoomNICControl)(_In_ int argc, _In_reads_(argc) PWSTR* argv);
 PnSendBoomNICControl nf_SendControl;
+HMODULE g_nBoomModuleHandler = NULL;
+HANDLE  g_removeEventHand = NULL;
 
 /*
     @ 获取服务状态
@@ -82,15 +84,37 @@ DWORD ReStartPnpBoomDriver(void)
 
 DWORD DeletePnpBoomDriver(void)
 /*
-    8. 卸载/删除驱动
+    9. 卸载/删除驱动
         Windows Pnp设备栈中删除注册和设备，没有删除相关文件和注册服务
         附加操作: 1. sc delete BoomNIC & 2. DeleteFile
 */
 {
+    if (!g_nBoomModuleHandler) {
+        g_nBoomModuleHandler = LoadLibrary(L"boomcon.dll");
+        if (!g_nBoomModuleHandler) {
+            cout << "Load boomcon faliuer" << endl;
+            return false;
+        }
+    }
+
+    if (!nf_SendControl) {
+        nf_SendControl = (PnSendBoomNICControl)GetProcAddress(g_nBoomModuleHandler, "nf_SendControl");
+        if (!nf_SendControl)
+            return false;
+    }
+
     DWORD nSeriverstatus = -1;
-    const WCHAR* nf_sendRemovCon[] = { L"boomcon.exe", L"remove", L"Driver.inf", L"ServicesName" };
-    const WCHAR* nf_sendRemovCon_reboot[] = { L"boomcon.exe", L"/r", L"remove", L"Driver.inf", L"ServicesName" };
-    nf_SendControl(4, (PWSTR*)nf_sendRemovCon);
+    const WCHAR* nf_sendRemovCon[] = { L"boomcon.exe", L"remove", L"BoomNIC" };
+    const WCHAR* nf_sendRemovCon_reboot[] = { L"boomcon.exe", L"/r", L"remove", L"BoomNIC" };
+    nf_SendControl(3, (PWSTR*)nf_sendRemovCon);
+    if (!g_removeEventHand)
+        g_removeEventHand = CreateEvent(NULL, FALSE, FALSE, TEXT("Global\\RemoveEvent"));
+    WaitForSingleObject(g_removeEventHand, INFINITE);
+    if (g_removeEventHand) {
+        CloseHandle(g_removeEventHand);
+        g_removeEventHand = NULL;
+    }
+
     nSeriverstatus = GetServicesStatus();
     switch (nSeriverstatus)
     {
@@ -99,33 +123,23 @@ DWORD DeletePnpBoomDriver(void)
     case SERVICE_RUNNING:
     case SERVICE_START_PENDING:
         cout << "Remove Driver Failuer" << endl;
-        // 如果删除失败，可能被占用。/r 重启时候删除。
-        nf_SendControl(5, (PWSTR*)nf_sendRemovCon_reboot);
+        // 如果删除失败: 可能设备正在被占用或其他情况。
+        //  - 加入参数 /r 重启时候删除设备网卡Pnp驱动，不需要等待。
+        nf_SendControl(4, (PWSTR*)nf_sendRemovCon_reboot);
         break;
     }
 
-    // 删除服务(注册表) & 驱动文件(需要管理员权限)
+    // sc删除服务(驱动注册表)
     wstring pszCmd = L"sc delete ServicesName";
     STARTUPINFO si = { sizeof(STARTUPINFO) };
     GetStartupInfo(&si);
     si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-    //si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE; //隐藏窗口；
+    si.wShowWindow = SW_HIDE;
     // 启动命令行
     PROCESS_INFORMATION pi;
-    CreateProcess(NULL,
-        (LPWSTR)pszCmd.c_str(),
-        NULL,
-        NULL,
-        TRUE,
-        //FALSE,          // Set handle inheritance to FALSE
-        NULL,
-        //0,              // No creation flags
-        NULL,
-        NULL,
-        &si,
-        &pi
-    );
+    CreateProcess(NULL, (LPWSTR)pszCmd.c_str(), NULL, NULL, TRUE, NULL, NULL, NULL, &si, &pi);
+    Sleep(500);
+    // 删除BoomNIC网卡驱动文件 - 理论上sc delete也会删除.
     DeleteFile(L"C:\\Windows\\System32\\drivers\\Driver.sys");
     return 0;
 }

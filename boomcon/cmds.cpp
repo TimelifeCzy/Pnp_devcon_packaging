@@ -1455,27 +1455,36 @@ Return Value:
         // failed to invoke DIF_REMOVE
         //
         action = pControlContext->strFail;
-    } else {
+    }
+    else {
         //
         // see if device needs reboot
         //
         devParams.cbSize = sizeof(devParams);
-        if(SetupDiGetDeviceInstallParams(Devs,DevInfo,&devParams) && (devParams.Flags & (DI_NEEDRESTART|DI_NEEDREBOOT))) {
+        if (SetupDiGetDeviceInstallParams(Devs, DevInfo, &devParams) && (devParams.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT))) {
             //
             // reboot required
             //
             action = pControlContext->strReboot;
+            _tprintf(TEXT("%-60s: %s\n"), devID, L"reboot driver success");
             pControlContext->reboot = TRUE;
-        } else {
+        }
+        else {
             //
             // appears to have succeeded
             //
             action = pControlContext->strSuccess;
+            _tprintf(TEXT("%-60s: %s\n"), devID, L"delete driver success");
         }
         pControlContext->count++;
     }
-    _tprintf(TEXT("%-60s: %s\n"),devID,action);
-
+    // callback evnet
+    HANDLE removevnet = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Global\\RemoveEvent");
+    if (removevnet) {
+        SetEvent(removevnet);
+        CloseHandle(removevnet);
+        removevnet = NULL;
+    }
     return EXIT_OK;
 }
 
@@ -1506,48 +1515,70 @@ Return Value:
     int failcode = EXIT_FAIL;
 
     UNREFERENCED_PARAMETER(Flags);
-
-    if(!argc) {
-        //
-        // arguments required
-        //
-        return EXIT_USAGE;
-    }
-    if(Machine) {
-        //
-        // must be local machine as we need to involve class/co installers
-        //
-        return EXIT_USAGE;
-    }
-    if(!LoadString(NULL,IDS_REMOVED,strRemove,ARRAYSIZE(strRemove))) {
-        return EXIT_FAIL;
-    }
-    if(!LoadString(NULL,IDS_REMOVED_REBOOT,strReboot,ARRAYSIZE(strReboot))) {
-        return EXIT_FAIL;
-    }
-    if(!LoadString(NULL,IDS_REMOVE_FAILED,strFail,ARRAYSIZE(strFail))) {
-        return EXIT_FAIL;
-    }
-
-    context.reboot = FALSE;
-    context.count = 0;
-    context.strReboot = strReboot;
-    context.strSuccess = strRemove;
-    context.strFail = strFail;
-    failcode = EnumerateDevices(BaseName,Machine,DIGCF_PRESENT,argc,argv,RemoveCallback,&context);
-
-    if(failcode == EXIT_OK) {
-
-        if(!context.count) {
-            FormatToStream(stdout,MSG_REMOVE_TAIL_NONE);
-        } else if(!context.reboot) {
-            FormatToStream(stdout,MSG_REMOVE_TAIL,context.count);
-        } else {
-            FormatToStream(stdout,MSG_REMOVE_TAIL_REBOOT,context.count);
-            failcode = EXIT_REBOOT;
+    do {
+        if (!argc) {
+            //
+            // arguments required
+            //
+            break;
+            // return EXIT_USAGE;
         }
+        if (Machine) {
+            //
+            // must be local machine as we need to involve class/co installers
+            //
+            break;
+            // return EXIT_USAGE;
+        }
+        if (!LoadString(NULL, IDS_REMOVED, strRemove, ARRAYSIZE(strRemove))) {
+            // 0x0000005db68ff520 L"Removed"
+            lstrcpyW(strRemove, L"Removed");
+            // break;
+            // return EXIT_FAIL;
+        }
+        if (!LoadString(NULL, IDS_REMOVED_REBOOT, strReboot, ARRAYSIZE(strReboot))) {
+            // 0x0000005db68ff5e0 L"Removed on reboot"
+            lstrcpyW(strRemove, L"Removed on reboot");
+            // break;
+            // return EXIT_FAIL;
+        }
+        if (!LoadString(NULL, IDS_REMOVE_FAILED, strFail, ARRAYSIZE(strFail))) {
+            // 0x0000005db68ff6a0 L"Remove failed"
+            lstrcpyW(strRemove, L"Remove failed");
+            // break;
+            // return EXIT_FAIL;
+        }
+        context.reboot = FALSE;
+        context.count = 0;
+        context.strReboot = strReboot;
+        context.strSuccess = strRemove;
+        context.strFail = strFail;
+        failcode = EnumerateDevices(BaseName, Machine, DIGCF_PRESENT, argc, argv, RemoveCallback, &context);
+
+        if (failcode == EXIT_OK) {
+
+            if (!context.count) {
+                FormatToStream(stdout, MSG_REMOVE_TAIL_NONE);
+            }
+            else if (!context.reboot) {
+                FormatToStream(stdout, MSG_REMOVE_TAIL, context.count);
+            }
+            else {
+                FormatToStream(stdout, MSG_REMOVE_TAIL_REBOOT, context.count);
+                failcode = EXIT_REBOOT;
+            }
+        }
+        return failcode;
+    } while (false);
+
+    // Error: Set Event
+    HANDLE removevnet = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Global\\RemoveEvent");
+    if (removevnet) {
+        SetEvent(removevnet);
+        CloseHandle(removevnet);
+        removevnet = NULL;
     }
-    return failcode;
+    return EXIT_FAIL;
 }
 
 int cmdRemoveAll(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])
